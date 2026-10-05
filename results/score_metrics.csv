@@ -1,0 +1,5 @@
+,value
+exact_score_accuracy,0.11947368421052632
+home_goals_mae,0.9639974524900727
+away_goals_mae,0.8778672962553358
+total_goals_mae,1.3064769958943783
