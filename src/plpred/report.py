@@ -25,7 +25,7 @@ SURFACE, INK, INK_2, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#c3c2b7", "
 BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"
 
 NICE = {
-    "ensemble": "Ensemble", "poisson": "Poisson goals", "logreg": "Logistic regression",
+    "ensemble": "Ensemble", "poisson": "Poisson goals", "dixon_coles": "Dixon-Coles", "logreg": "Logistic regression",
     "random_forest": "Random forest", "xgboost": "XGBoost", "elo": "Elo only",
     "baseline": "Baseline (frequencies)",
 }
@@ -131,6 +131,26 @@ def feature_importance(top: int = 12) -> None:
     plt.close(fig)
 
 
+def low_scores(cells: pd.DataFrame) -> None:
+    """Predicted vs actual counts of the four scorelines Dixon-Coles adjusts."""
+    scores = ["0-0", "1-0", "0-1", "1-1"]
+    pois = cells[cells.model.str.startswith("Poisson")].set_index("score").loc[scores]
+    dc = cells[cells.model.str.startswith("Dixon")].set_index("score").loc[scores]
+    x, w = np.arange(len(scores)), 0.26
+    fig, ax = plt.subplots(figsize=(7, 3.6))
+    ax.bar(x - w, pois.actual, w, color=INK_2, label="Actual")
+    ax.bar(x, pois.predicted, w, color=MUTED, label="Poisson (independent)")
+    ax.bar(x + w, dc.predicted, w, color=BLUE, label="Dixon-Coles")
+    ax.set_xticks(x, scores)
+    ax.set_ylabel("Matches (of 3,800)")
+    ax.grid(axis="x", visible=False)
+    ax.legend(frameon=False, fontsize=9, loc="upper left")
+    ax.set_title("Low scorelines, 2016-17 to 2025-26: predicted vs actual", loc="left", fontsize=11)
+    fig.tight_layout()
+    fig.savefig(FIG_DIR / "low_scores.png", dpi=160)
+    plt.close(fig)
+
+
 def main() -> None:
     FIG_DIR.mkdir(exist_ok=True)
     summary = pd.read_csv(RESULTS_DIR / "metrics_summary.csv")
@@ -140,6 +160,9 @@ def main() -> None:
     accuracy_by_season(by_season)
     calibration(preds)
     feature_importance()
+    low_score_file = RESULTS_DIR / "low_score_calibration.csv"
+    if low_score_file.exists():
+        low_scores(pd.read_csv(low_score_file))
     print(f"Saved figures to {FIG_DIR}")
 
 

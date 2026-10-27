@@ -65,13 +65,17 @@ def summarize(preds: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("rps").reset_index(drop=True)
 
 
-def score_metrics(preds: pd.DataFrame) -> dict[str, float]:
-    p = preds[preds.model == "poisson"]
+def score_metrics(preds: pd.DataFrame, model: str = "poisson") -> dict[str, float]:
+    p = preds[preds.model == model]
+    actual_draw = p.FTHG == p.FTAG
     return {
         "exact_score_accuracy": float(((p.pred_hg == p.FTHG) & (p.pred_ag == p.FTAG)).mean()),
         "home_goals_mae": float((p.xg_home - p.FTHG).abs().mean()),
         "away_goals_mae": float((p.xg_away - p.FTAG).abs().mean()),
         "total_goals_mae": float(((p.xg_home + p.xg_away) - (p.FTHG + p.FTAG)).abs().mean()),
+        "mean_p_draw": float(p.p_draw.mean()),
+        "actual_draw_rate": float(actual_draw.mean()),
+        "p_draw_when_draw": float(p.p_draw[actual_draw].mean()),
     }
 
 
@@ -83,18 +87,19 @@ def main(argv: list[str] | None = None) -> None:
     df = build_features()
     by_season, preds = walk_forward(df, args.first_test_year)
     summary = summarize(preds)
-    scores = score_metrics(preds)
+    scores = pd.DataFrame({m: score_metrics(preds, m) for m in ["poisson", "dixon_coles"]})
 
     RESULTS_DIR.mkdir(exist_ok=True)
     by_season.to_csv(RESULTS_DIR / "metrics_by_season.csv", index=False)
     summary.to_csv(RESULTS_DIR / "metrics_summary.csv", index=False)
     preds.to_csv(RESULTS_DIR / "predictions.csv.gz", index=False)
-    pd.Series(scores).to_csv(RESULTS_DIR / "score_metrics.csv", header=["value"])
+    scores.to_csv(RESULTS_DIR / "score_metrics.csv")
 
     pd.set_option("display.width", 140)
     print("\nOverall (all test seasons pooled):")
     print(summary.round(4).to_string(index=False))
-    print("\nPoisson scoreline metrics:", {k: round(v, 4) for k, v in scores.items()})
+    print("\nScoreline metrics:")
+    print(scores.round(4).to_string())
 
 
 if __name__ == "__main__":

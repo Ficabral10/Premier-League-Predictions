@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize_scalar
 from scipy.stats import poisson
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
@@ -93,6 +94,50 @@ class PoissonScoreModel:
         return scores
 
 
+def dixon_coles_tau(h: np.ndarray, a: np.ndarray, lam_h: np.ndarray, lam_a: np.ndarray, rho: float) -> np.ndarray:
+    """Dixon & Coles (1997) adjustment factor for scorelines 0-0, 1-0, 0-1 and 1-1.
+
+    Independent Poissons under-predict 0-0 and 1-1 and over-predict 1-0 and 0-1. tau rescales
+    exactly those four cells; every other score keeps factor 1. rho < 0 means more low draws.
+    """
+    tau = np.ones(np.broadcast(h, a, lam_h, lam_a).shape)
+    tau = np.where((h == 0) & (a == 0), 1 - lam_h * lam_a * rho, tau)
+    tau = np.where((h == 0) & (a == 1), 1 + lam_h * rho, tau)
+    tau = np.where((h == 1) & (a == 0), 1 + lam_a * rho, tau)
+    tau = np.where((h == 1) & (a == 1), 1 - rho, tau)
+    return tau
+
+
+class DixonColesScoreModel(PoissonScoreModel):
+    """Poisson goals model plus the Dixon-Coles low-score correction.
+
+    The expected-goals regressions are unchanged; rho is then fitted by maximum likelihood on the
+    training matches only, holding the expected goals fixed (the tau term is the only part of the
+    likelihood that depends on rho).
+    """
+
+    name = "Dixon-Coles goals model"
+
+    def fit(self, train: pd.DataFrame, features: list[str]) -> DixonColesScoreModel:
+        super().fit(train, features)
+        lh, la = self.expected_goals(train)
+        h, a = train["FTHG"].to_numpy(), train["FTAG"].to_numpy()
+
+        def neg_log_lik(rho: float) -> float:
+            tau = dixon_coles_tau(h, a, lh, la, rho)
+            return -np.log(np.clip(tau, 1e-10, None)).sum()
+
+        self.rho_ = float(minimize_scalar(neg_log_lik, bounds=(-0.3, 0.3), method="bounded").x)
+        return self
+
+    def score_matrix(self, lam_home: float, lam_away: float) -> np.ndarray:
+        goals = np.arange(MAX_GOALS + 1)
+        m = np.outer(poisson.pmf(goals, lam_home), poisson.pmf(goals, lam_away))
+        hh, aa = np.meshgrid(goals, goals, indexing="ij")
+        m = m * np.clip(dixon_coles_tau(hh, aa, lam_home, lam_away, self.rho_), 0, None)
+        return m / m.sum()
+
+
 class AverageEnsemble:
     """Averages the probabilities of several fitted models."""
 
@@ -138,6 +183,7 @@ def build_models(random_state: int = 42) -> dict[str, object]:
         ),
         "xgboost": SklearnOutcomeModel("XGBoost", xgb()),
         "poisson": PoissonScoreModel(),
+        "dixon_coles": DixonColesScoreModel(),
         "ensemble": AverageEnsemble(
             "Ensemble (LogReg + XGBoost + Poisson)",
             [SklearnOutcomeModel("LogReg", _logreg()), SklearnOutcomeModel("XGB", xgb()), PoissonScoreModel()],

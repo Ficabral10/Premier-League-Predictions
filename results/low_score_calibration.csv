@@ -1,0 +1,9 @@
+model,score,predicted,actual
+Poisson goals model,0-0,251.65381212857585,231
+Poisson goals model,1-0,374.6274488827372,333
+Poisson goals model,0-1,302.1441639698467,259
+Poisson goals model,1-1,419.49918217193033,414
+Dixon-Coles goals model,0-0,268.99072698754526,231
+Dixon-Coles goals model,1-0,357.29053402376786,333
+Dixon-Coles goals model,0-1,284.80724911087736,259
+Dixon-Coles goals model,1-1,436.83609703089974,414

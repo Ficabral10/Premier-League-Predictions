@@ -1,6 +1,6 @@
 # ⚽ Premier League Match Predictor
 
-Predicts the result **and the most likely scoreline** of Premier League matches, and compares six
+Predicts the result **and the most likely scoreline** of Premier League matches, and compares seven
 machine-learning approaches on 10 seasons of unseen games.
 
 ![CI](https://github.com/Ficabral10/Premier-League-Predictions/actions/workflows/ci.yml/badge.svg)
@@ -27,6 +27,7 @@ machine-learning approaches on 10 seasons of unseen games.
 |---|---|---|---|---|
 | **Ensemble** (LogReg + XGBoost + Poisson) | 54.1% | **0.966** | **0.573** | **0.1981** |
 | Poisson goals model | **54.4%** | 0.966 | 0.573 | 0.1984 |
+| Dixon-Coles goals model | **54.4%** | 0.966 | 0.573 | 0.1984 |
 | Logistic regression | 54.1% | 0.970 | 0.575 | 0.1988 |
 | Random forest | 54.0% | 0.970 | 0.575 | 0.1991 |
 | XGBoost | 53.9% | 0.971 | 0.576 | 0.1994 |
@@ -54,6 +55,18 @@ the *probabilities*, not just the top pick, which matters for any real use (bett
 5. **The probabilities are well calibrated.** When the ensemble says 60%, the event happens about 60% of the time:
 
 <p align="center"><img src="figures/calibration.png" width="420" alt="Calibration curve"></p>
+
+6. **The textbook Dixon-Coles fix barely helped, and the reason is interesting.** Independent Poissons are
+   known to under-predict 0-0 and 1-1, so I added the [Dixon-Coles (1997)](https://www.jstor.org/stable/2986290)
+   correction, fitting its correlation parameter ρ on training seasons only. It found ρ ≈ −0.04, in line
+   with published estimates, but improved scoreline log loss only from 2.9355 to 2.9351. Checking
+   predicted vs actual low scores showed why: in recent seasons the plain Poisson model already
+   *over*-predicts all four low scores (1,348 predicted vs 1,237 actual). 0-0s fell from about 9% of games
+   in the late 1990s to 5-7% today while goals per game rose, so the model's expected goals run slightly
+   low. Dixon-Coles fixes 1-0 and 0-1 but makes 0-0 and 1-1 worse. Fitting ρ on only the last 3-5 seasons
+   didn't help either, so the real fix is a goal rate that adapts over time, not a different ρ.
+
+<p align="center"><img src="figures/low_scores.png" width="560" alt="Predicted vs actual low scorelines"></p>
 
 ![Accuracy by season](figures/accuracy_by_season.png)
 
@@ -88,6 +101,7 @@ result never changes its own features.
 | Logistic regression | All features, standardized, L2-regularized |
 | Random forest / XGBoost | Tree ensembles on all features |
 | Poisson goals | Two Poisson regressions predict each side's expected goals, combined into a full scoreline probability grid |
+| Dixon-Coles | The Poisson grid with the Dixon-Coles adjustment to 0-0, 1-0, 0-1 and 1-1; ρ fitted by maximum likelihood on training data |
 | Ensemble | Average of the logistic regression, XGBoost and Poisson probabilities |
 
 **Why walk-forward and not a random split?** Shuffling matches lets the model train on games from the
@@ -101,8 +115,9 @@ git clone https://github.com/Ficabral10/Premier-League-Predictions.git
 cd Premier-League-Predictions
 pip install -e ".[app,dev]"
 
-make test       # 11 unit tests, including the no-leakage check
+make test       # 13 unit tests, including the no-leakage check
 make backtest   # walk-forward evaluation (~1-2 min) -> results/
+make scorelines # Poisson vs Dixon-Coles at the exact-score level -> results/
 make report     # regenerate the charts -> figures/
 make app        # interactive predictor at http://localhost:8501
 
@@ -116,9 +131,10 @@ src/plpred/
   data.py        load and clean 33 seasons of CSVs
   elo.py         Elo rating system
   features.py    leakage-free pre-match features
-  models.py      baseline, Elo, LogReg, RF, XGBoost, Poisson, ensemble
+  models.py      baseline, Elo, LogReg, RF, XGBoost, Poisson, Dixon-Coles, ensemble
   metrics.py     accuracy, log loss, Brier, ranked probability score
   backtest.py    walk-forward evaluation
+  scorelines.py  exact-score evaluation of the goals models
   tune_elo.py    Elo hyperparameter search (pre-2016 data only)
   predict.py     predict any fixture from the latest data
   report.py      charts
@@ -130,8 +146,8 @@ data/raw/              match data (public domain, see data/README.md)
 
 ## Limitations and next steps
 
-- **Dixon-Coles correction.** The Poisson model treats home and away goals as independent, which
-  under-predicts 0-0 and 1-1 draws. The Dixon-Coles adjustment is the classic fix.
+- **Time-varying goal rates.** Scoring has drifted up over the decades (see finding 6). Weighting recent
+  seasons more, as Dixon and Coles also proposed, should fix the low-score bias at its source.
 - **Expected goals (xG).** Shot quality data (not just shot counts) should sharpen the form features.
 - **Lineups and injuries.** The model knows nothing about who actually plays.
 - **Bookmaker benchmark.** Comparing against closing betting odds is the toughest test of a football model.

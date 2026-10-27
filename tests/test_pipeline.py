@@ -6,7 +6,7 @@ from plpred.data import load_matches, season_label
 from plpred.elo import EloConfig, EloTracker
 from plpred.features import build_features, feature_columns
 from plpred.metrics import evaluate, ranked_probability_score
-from plpred.models import PoissonScoreModel, PriorBaseline
+from plpred.models import DixonColesScoreModel, PoissonScoreModel, PriorBaseline, dixon_coles_tau
 
 
 @pytest.fixture(scope="module")
@@ -112,3 +112,23 @@ def test_models_return_valid_probabilities(features):
         assert np.allclose(proba.sum(axis=1), 1.0)
         metrics = evaluate(test["y"].to_numpy(), proba)
         assert 0 <= metrics["accuracy"] <= 1
+
+
+def test_dixon_coles_tau_only_touches_low_scores():
+    goals = np.arange(6)
+    hh, aa = np.meshgrid(goals, goals, indexing="ij")
+    tau = dixon_coles_tau(hh, aa, 1.4, 1.1, -0.1)
+    low = (hh <= 1) & (aa <= 1)
+    assert np.allclose(tau[~low], 1.0)
+    assert tau[0, 0] > 1 and tau[1, 1] > 1      # rho < 0 boosts 0-0 and 1-1
+    assert tau[1, 0] < 1 and tau[0, 1] < 1      # ... and takes from 1-0 and 0-1
+
+
+def test_dixon_coles_matrix_is_a_distribution_and_rho_is_negative(features):
+    train = features[(features.season_year >= 2000) & (features.season_year < 2010)]
+    model = DixonColesScoreModel().fit(train, feature_columns(features))
+    assert -0.3 < model.rho_ < 0          # low draws are under-predicted by independent Poissons
+    m = model.score_matrix(1.5, 1.1)
+    assert m.min() >= 0 and np.isclose(m.sum(), 1.0)
+    base = PoissonScoreModel.score_matrix(1.5, 1.1)
+    assert m[0, 0] > base[0, 0] and m[1, 1] > base[1, 1]
